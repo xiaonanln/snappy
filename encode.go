@@ -222,18 +222,30 @@ func (w *Writer) write(p []byte) (nRet int, errRet error) {
 		} else {
 			uncompressed, p = p, nil
 		}
-		checksum := crc(uncompressed)
+		//checksum := crc(uncompressed)
+		checksum := uint32(0)
 
 		// Compress the buffer, discarding the result if the improvement
 		// isn't at least 12.5%.
-		compressed := Encode(w.obuf[obufHeaderLen:], uncompressed)
-		chunkType := uint8(chunkTypeCompressedData)
-		chunkLen := 4 + len(compressed)
-		obufEnd := obufHeaderLen + len(compressed)
-		if len(compressed) >= len(uncompressed)-len(uncompressed)/8 {
+
+		var chunkType uint8
+		var chunkLen int
+		var obufEnd int
+
+		if len(uncompressed) < 512 {
 			chunkType = chunkTypeUncompressedData
 			chunkLen = 4 + len(uncompressed)
 			obufEnd = obufHeaderLen
+		} else {
+			compressed := Encode(w.obuf[obufHeaderLen:], uncompressed)
+			chunkType = uint8(chunkTypeCompressedData)
+			chunkLen = 4 + len(compressed)
+			obufEnd = obufHeaderLen + len(compressed)
+			if len(compressed) >= len(uncompressed)-len(uncompressed)/8 {
+				chunkType = chunkTypeUncompressedData
+				chunkLen = 4 + len(uncompressed)
+				obufEnd = obufHeaderLen
+			}
 		}
 
 		// Fill in the per-chunk header that comes before the body.

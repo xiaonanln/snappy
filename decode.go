@@ -8,6 +8,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"net"
+
+	"github.com/xiaonanln/goworld/engine/gwlog"
 )
 
 var (
@@ -109,7 +113,23 @@ func (r *Reader) ClearError() {
 }
 
 func (r *Reader) readFull(p []byte, allowEOF bool) (ok bool) {
-	if _, r.err = io.ReadFull(r.r, p); r.err != nil {
+	var n int
+	if n, r.err = io.ReadFull(r.r, p); r.err != nil {
+
+		if n > 0 {
+			if neterr, ok := r.err.(net.Error); ok && (neterr.Temporary() || neterr.Timeout()) {
+				// temporary / timeout, keep trying until full
+				p = p[n:]
+				for len(p) > 0 {
+					n, r.err = io.ReadFull(r.r, p)
+					p = p[n:]
+					if neterr, ok := r.err.(net.Error); ok && (neterr.Temporary() || neterr.Timeout()) {
+						continue
+					}
+				}
+			}
+		}
+
 		if r.err == io.ErrUnexpectedEOF || (r.err == io.EOF && !allowEOF) {
 			r.err = ErrCorrupt
 		}
@@ -121,7 +141,11 @@ func (r *Reader) readFull(p []byte, allowEOF bool) (ok bool) {
 // Read satisfies the io.Reader interface.
 func (r *Reader) Read(p []byte) (int, error) {
 	if r.err != nil {
-		return 0, r.err
+		if neterr, ok := r.err.(net.Error); ok && (neterr.Temporary() || neterr.Timeout()) {
+			r.err = nil
+		} else {
+			return 0, r.err
+		}
 	}
 	for {
 		if r.i < r.j {
@@ -142,6 +166,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 		}
 		chunkLen := int(r.buf[1]) | int(r.buf[2])<<8 | int(r.buf[3])<<16
 		if chunkLen > len(r.buf) {
+			gwlog.Fatalf("chunkLen = %d > %d!!!", chunkLen, len(r.buf))
 			r.err = ErrUnsupported
 			return 0, r.err
 		}
@@ -159,7 +184,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 			if !r.readFull(buf, false) {
 				return 0, r.err
 			}
-			checksum := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
+			//checksum := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
 			buf = buf[checksumSize:]
 
 			n, err := DecodedLen(buf)
@@ -175,10 +200,10 @@ func (r *Reader) Read(p []byte) (int, error) {
 				r.err = err
 				return 0, r.err
 			}
-			if crc(r.decoded[:n]) != checksum {
-				r.err = ErrCorrupt
-				return 0, r.err
-			}
+			//if crc(r.decoded[:n]) != checksum {
+			//	r.err = ErrCorrupt
+			//	return 0, r.err
+			//}
 			r.i, r.j = 0, n
 			continue
 
@@ -192,7 +217,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 			if !r.readFull(buf, false) {
 				return 0, r.err
 			}
-			checksum := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
+			//checksum := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
 			// Read directly into r.decoded instead of via r.buf.
 			n := chunkLen - checksumSize
 			if n > len(r.decoded) {
@@ -202,10 +227,10 @@ func (r *Reader) Read(p []byte) (int, error) {
 			if !r.readFull(r.decoded[:n], false) {
 				return 0, r.err
 			}
-			if crc(r.decoded[:n]) != checksum {
-				r.err = ErrCorrupt
-				return 0, r.err
-			}
+			//if crc(r.decoded[:n]) != checksum {
+			//	r.err = ErrCorrupt
+			//	return 0, r.err
+			//}
 			r.i, r.j = 0, n
 			continue
 
