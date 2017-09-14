@@ -104,6 +104,10 @@ func (r *Reader) Reset(reader io.Reader) {
 	r.readHeader = false
 }
 
+func (r *Reader) ClearError() {
+	r.err = nil
+}
+
 func (r *Reader) readFull(p []byte, allowEOF bool) (ok bool) {
 	if _, r.err = io.ReadFull(r.r, p); r.err != nil {
 		if r.err == io.ErrUnexpectedEOF || (r.err == io.EOF && !allowEOF) {
